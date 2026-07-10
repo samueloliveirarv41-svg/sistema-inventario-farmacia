@@ -12,16 +12,8 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(page_title="Inventário CCE", layout="centered")
 
-# Inicialização de sessão
 if 'user' not in st.session_state:
     st.session_state.user = None
-
-# --- FUNÇÃO DE BUSCA OTIMIZADA (Para garantir tempo real) ---
-@st.cache_data(ttl=0)
-def buscar_contagens_banco(id_posicao_fk):
-    # Força a re-leitura do banco ignorando qualquer cache anterior
-    res = supabase.table("inventario").select("sku_contado").eq("id_posicao_fk", id_posicao_fk).execute()
-    return [c['sku_contado'] for c in res.data]
 
 # --- LOGIN ---
 if st.session_state.user is None:
@@ -44,7 +36,7 @@ else:
         if modo_adm:
             st.title("📊 Painel de Controle: Posições")
             
-            # Métricas
+            # Consultas diretas para garantir dados atuais
             todas = supabase.table("posicoes").select("id_posicao").execute().data
             set_total = set([p['id_posicao'] for p in todas])
             contagens = supabase.table("inventario").select("id_posicao_fk").execute().data
@@ -59,7 +51,6 @@ else:
             if contagens:
                 df = pd.DataFrame(supabase.table("inventario").select("*").execute().data)
                 st.dataframe(df)
-                st.download_button("Exportar CSV", df.to_csv(index=False), "relatorio.csv", "text/csv")
 
     # --- PAINEL DE CONTAGEM ---
     if not modo_adm:
@@ -70,25 +61,28 @@ else:
         posicao_digitada = st.text_input("Código da Posição:", value=valor_lido if valor_lido else "")
 
         if posicao_digitada:
+            # Busca a posição e as contagens já feitas nesta posição
             pos_data = supabase.table("posicoes").select("*").eq("id_posicao", posicao_digitada).execute()
             
             if pos_data.data:
                 id_pos = pos_data.data[0]['id']
-                # Chama a função que busca dados frescos
-                skus_contados = buscar_contagens_banco(id_pos)
+                # Consulta direta ao banco (sem cache) para garantir atualização
+                res = supabase.table("inventario").select("sku_contado").eq("id_posicao_fk", id_pos).execute()
+                skus_contados = [c['sku_contado'] for c in res.data]
                 
+                # Monta lista com status atualizado
                 opcoes = {}
                 for item in pos_data.data:
                     sku = item['sku']
                     status = "✅" if sku in skus_contados else "⏳"
-                    label = f"{status} {sku} - {item.get('descricao_sku') or ''}"
+                    label = f"{status} {sku}"
                     opcoes[label] = item
 
                 if len(skus_contados) >= len(pos_data.data):
                     st.balloons()
                     st.success(f"Posição {posicao_digitada} finalizada!")
                 else:
-                    sku_sel = st.selectbox("Selecione o produto (pendentes):", list(opcoes.keys()))
+                    sku_sel = st.selectbox("Selecione o produto:", list(opcoes.keys()))
                     
                     with st.form("form_contagem", clear_on_submit=True):
                         fabricante = st.text_input("Fabricante")
@@ -98,8 +92,9 @@ else:
                         gtin = st.text_input("GTIN / Código de Barras", disabled=sem_gtin)
                         
                         if st.form_submit_button("Registrar"):
+                            # Insere o novo registro
                             supabase.table("inventario").insert({
-                                "id_posicao_fk": opcoes[sku_sel]['id'],
+                                "id_posicao_fk": id_pos,
                                 "sku_contado": opcoes[sku_sel]['sku'],
                                 "fabricante": fabricante,
                                 "lote": lote,
@@ -108,9 +103,9 @@ else:
                                 "usuario_email": st.session_state.user['email']
                             }).execute()
                             
-                            # Força a limpeza do cache e recarrega a página
-                            st.cache_data.clear()
-                            time.sleep(0.3)
+                            # Confirmação visual rápida e atualização
+                            st.toast("Contagem registrada com sucesso!", icon="✅")
+                            time.sleep(0.5) 
                             st.rerun()
             else:
                 st.warning("Posição não encontrada.")
