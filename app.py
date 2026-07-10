@@ -14,7 +14,7 @@ st.set_page_config(page_title="Inventário CCE", layout="centered")
 if 'user' not in st.session_state:
     st.session_state.user = None
 
-# --- FLUXO DE LOGIN ---
+# --- LOGIN ---
 if st.session_state.user is None:
     st.title("🔐 Login Inventário")
     email = st.text_input("E-mail:")
@@ -26,7 +26,6 @@ if st.session_state.user is None:
         else:
             st.error("Usuário não encontrado.")
 else:
-    # Variável para controlar se estamos no modo ADM
     modo_adm = False
 
     # --- DASHBOARD ADMINISTRATIVO ---
@@ -36,7 +35,7 @@ else:
         if modo_adm:
             st.title("📊 Painel de Controle: Posições")
             
-            # Cálculo das métricas
+            # Busca todas as posições únicas e as já contadas
             todas_posicoes = supabase.table("posicoes").select("id_posicao").execute().data
             set_total = set([p['id_posicao'] for p in todas_posicoes])
             
@@ -47,7 +46,7 @@ else:
             contadas = len(ids_contados)
             pendentes = total - contadas
             
-            # Exibição dos cards de controle
+            # Cards de métricas
             col1, col2, col3 = st.columns(3)
             col1.metric("Total Posições", total)
             col2.metric("Contadas", contadas)
@@ -62,7 +61,8 @@ else:
             else:
                 st.info("Nenhuma contagem realizada.")
 
-    # --- PAINEL DE CONTAGEM (Aparece apenas se NÃO estiver em modo ADM) ---
+    # --- PAINEL DE CONTAGEM ---
+    # Só exibe se não estiver em modo ADM
     if not modo_adm:
         st.title("📦 Inventário CCE")
         st.write(f"Usuário: {st.session_state.user['email']}")
@@ -72,10 +72,13 @@ else:
 
         if posicao_digitada:
             pos_data = supabase.table("posicoes").select("*").eq("id_posicao", posicao_digitada).execute()
+            
             if pos_data.data:
+                # Busca as contagens ATUALIZADAS do banco
                 contagens = supabase.table("inventario").select("sku_contado").eq("id_posicao_fk", pos_data.data[0]['id']).execute()
                 skus_contados = [c['sku_contado'] for c in contagens.data]
                 
+                # Monta lista de produtos com status atualizado em tempo real
                 opcoes = {}
                 for item in pos_data.data:
                     sku = item['sku']
@@ -84,11 +87,13 @@ else:
                     label = f"{status} {sku} - {desc}"
                     opcoes[label] = item
 
+                # Verifica se a posição foi finalizada
                 if len(skus_contados) >= len(pos_data.data):
                     st.balloons()
                     st.success(f"Posição {posicao_digitada} finalizada!")
                 else:
-                    sku_selecionado = st.selectbox("Selecione o produto:", list(opcoes.keys()))
+                    sku_selecionado = st.selectbox("Selecione o produto (pendentes):", list(opcoes.keys()))
+                    
                     with st.form("form_contagem", clear_on_submit=True):
                         fabricante = st.text_input("Fabricante")
                         lote = st.text_input("Lote")
@@ -107,12 +112,12 @@ else:
                                 "gtin_lido": "SEM GTIN" if sem_gtin else gtin,
                                 "usuario_email": st.session_state.user['email']
                             }).execute()
-                            st.success("Contagem registrada!")
-                            st.rerun()
+                            
+                            st.success("Registrado!")
+                            st.rerun() # Recarrega a página para atualizar o status do item na lista
             else:
                 st.warning("Posição não encontrada.")
 
-    # Botão de sair fixo para ambos os perfis
     if st.button("Sair"):
         st.session_state.user = None
         st.rerun()
