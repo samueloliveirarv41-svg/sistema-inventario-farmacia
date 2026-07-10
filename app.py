@@ -1,10 +1,12 @@
 import streamlit as st
 from supabase import create_client
 from streamlit_qrcode_scanner import qrcode_scanner
+import pandas as pd
 
 # --- CONFIGURAÇÃO ---
 SUPABASE_URL = "https://ywkxkwmseaqfghnyghpz.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl3a3hrd21zZWFxZmdobnlnaHB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MDQ4ODIsImV4cCI6MjA5OTA4MDg4Mn0.JM4ZZ1SUqCXp2GU13p3xoHWxO1WJmZeQ4KL_jN_u1TE"
+ADMINS = ["seu-email-adm@rvimola.com.br"] # Adicione os e-mails aqui
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -13,6 +15,7 @@ st.set_page_config(page_title="Inventário CCE", layout="centered")
 if 'user' not in st.session_state:
     st.session_state.user = None
 
+# --- LOGIN ---
 if st.session_state.user is None:
     st.title("🔐 Login Inventário")
     email = st.text_input("E-mail:")
@@ -21,42 +24,57 @@ if st.session_state.user is None:
         if res.data:
             st.session_state.user = res.data[0]
             st.rerun()
+        else:
+            st.error("Usuário não encontrado.")
 else:
+    # --- DASHBOARD ADMIN ---
+    if st.session_state.user['email'] in ADMINS:
+        if st.sidebar.checkbox("Modo Administrador"):
+            st.title("📊 Dashboard de Gestão")
+            dados = supabase.table("inventario").select("*").execute()
+            if dados.data:
+                df = pd.DataFrame(dados.data)
+                col1, col2 = st.columns(2)
+                col1.metric("Total de Contagens", len(df))
+                col2.metric("SKUs Contados", df['sku_contado'].nunique())
+                st.dataframe(df)
+                st.download_button("Exportar CSV", df.to_csv(index=False), "relatorio.csv", "text/csv")
+            else:
+                st.info("Nenhuma contagem realizada.")
+            st.divider()
+
+    # --- PAINEL DE CONTAGEM ---
     st.title("📦 Inventário CCE")
+    st.write(f"Usuário: {st.session_state.user['email']}")
+    
     valor_lido = qrcode_scanner(key='scanner')
     posicao_digitada = st.text_input("Código da Posição:", value=valor_lido if valor_lido else "")
 
     if posicao_digitada:
         pos_data = supabase.table("posicoes").select("*").eq("id_posicao", posicao_digitada).execute()
         if pos_data.data:
-            # Busca o que já foi contado nesta posição
             contagens = supabase.table("inventario").select("sku_contado").eq("id_posicao_fk", pos_data.data[0]['id']).execute()
             skus_contados = [c['sku_contado'] for c in contagens.data]
             
-            # Prepara opções com Status
             opcoes = {}
             for item in pos_data.data:
                 sku = item['sku']
-                status = "✅ Já Contado" if sku in skus_contados else "⏳ Pendente"
+                status = "✅" if sku in skus_contados else "⏳"
                 desc = item.get('descricao_sku') or ""
-                label = f"{status} | {sku} - {desc}"
+                label = f"{status} {sku} - {desc}"
                 opcoes[label] = item
 
-            # Bloqueio se 100% contada
             if len(skus_contados) >= len(pos_data.data):
                 st.balloons()
-                st.success(f"Posição {posicao_digitada} já está 100% contada!")
+                st.success(f"Posição {posicao_digitada} finalizada!")
             else:
                 sku_selecionado = st.selectbox("Selecione o produto:", list(opcoes.keys()))
-                
                 with st.form("form_contagem", clear_on_submit=True):
                     fabricante = st.text_input("Fabricante")
                     lote = st.text_input("Lote")
                     qtd = st.number_input("Quantidade", min_value=0, step=1)
-                    
-                    # Checkbox GTIN
-                    sem_gtin = st.checkbox("Produto sem GTIN / Código de Barras")
-                    gtin = st.text_input("GTIN do produto", disabled=sem_gtin)
+                    sem_gtin = st.checkbox("Produto sem GTIN")
+                    gtin = st.text_input("GTIN / Código de Barras", disabled=sem_gtin)
                     
                     if st.form_submit_button("Registrar"):
                         item = opcoes[sku_selecionado]
@@ -73,3 +91,7 @@ else:
                         st.rerun()
         else:
             st.warning("Posição não encontrada.")
+
+    if st.button("Sair"):
+        st.session_state.user = None
+        st.rerun()
