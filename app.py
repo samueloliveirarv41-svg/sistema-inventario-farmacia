@@ -13,7 +13,7 @@ st.set_page_config(page_title="Inventário CCE", layout="centered")
 if 'user' not in st.session_state:
     st.session_state.user = None
 
-# --- LOGIN ---
+# --- TELA DE LOGIN ---
 if st.session_state.user is None:
     st.title("🔐 Login Inventário")
     email = st.text_input("E-mail:")
@@ -26,17 +26,15 @@ if st.session_state.user is None:
             else:
                 st.error("Usuário não encontrado.")
         except Exception as e:
-            st.error(f"Erro ao conectar ao banco: {e}")
+            st.error(f"Erro ao conectar: {e}")
 else:
-    # --- CONTAGEM ---
+    # --- TELA DE CONTAGEM ---
     st.title("📦 Inventário CCE")
     st.write(f"Usuário: {st.session_state.user['email']}")
     
-    # Leitor Automático
     st.subheader("Bipe a Posição")
     valor_lido = qrcode_scanner(key='scanner')
     
-    # Campo para fallback ou digitação manual
     posicao_digitada = st.text_input("Código da Posição:", value=valor_lido if valor_lido else "")
 
     if posicao_digitada:
@@ -46,16 +44,23 @@ else:
             if res.data:
                 st.success(f"Posição {posicao_digitada} encontrada!")
                 
-                # Lista de produtos na posição
-                opcoes = {f"{item['sku']} - {item.get('descricao_sku', 'Sem descrição')}": item for item in res.data}
+                # Ajuste para não mostrar "None"
+                opcoes = {}
+                for item in res.data:
+                    sku = item.get('sku', '')
+                    desc = item.get('descricao_sku')
+                    # Cria um label limpo
+                    label = f"{sku} - {desc}" if desc and desc.lower() != 'none' else f"{sku}"
+                    opcoes[label] = item
+                
                 sku_selecionado = st.selectbox("Selecione o produto:", list(opcoes.keys()))
                 
                 with st.form("form_contagem", clear_on_submit=True):
                     lote = st.text_input("Lote")
-                    qtd = st.number_input("Quantidade", min_value=0)
+                    qtd = st.number_input("Quantidade Contada", min_value=0, step=1)
                     gtin = st.text_input("GTIN / Código de Barras")
                     
-                    if st.form_submit_button("Salvar Contagem"):
+                    if st.form_submit_button("Registrar Contagem"):
                         item = opcoes[sku_selecionado]
                         supabase.table("inventario").insert({
                             "id_posicao_fk": item['id'],
@@ -69,7 +74,7 @@ else:
             else:
                 st.warning("Posição não encontrada no banco de dados.")
         except Exception as e:
-            st.error(f"Erro ao buscar posição: {e}")
+            st.error(f"Erro ao processar: {e}")
 
     if st.button("Sair"):
         st.session_state.user = None
