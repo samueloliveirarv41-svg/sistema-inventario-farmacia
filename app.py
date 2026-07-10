@@ -13,69 +13,63 @@ st.set_page_config(page_title="Inventário CCE", layout="centered")
 if 'user' not in st.session_state:
     st.session_state.user = None
 
-# --- TELA DE LOGIN ---
 if st.session_state.user is None:
     st.title("🔐 Login Inventário")
     email = st.text_input("E-mail:")
     if st.button("Entrar"):
-        try:
-            res = supabase.table("usuarios").select("*").eq("email", email.strip()).execute()
-            if res.data and len(res.data) > 0:
-                st.session_state.user = res.data[0]
-                st.rerun()
-            else:
-                st.error("Usuário não encontrado.")
-        except Exception as e:
-            st.error(f"Erro ao conectar: {e}")
+        res = supabase.table("usuarios").select("*").eq("email", email.strip()).execute()
+        if res.data:
+            st.session_state.user = res.data[0]
+            st.rerun()
 else:
-    # --- TELA DE CONTAGEM ---
     st.title("📦 Inventário CCE")
-    st.write(f"Usuário: {st.session_state.user['email']}")
-    
-    st.subheader("Bipe a Posição")
     valor_lido = qrcode_scanner(key='scanner')
     posicao_digitada = st.text_input("Código da Posição:", value=valor_lido if valor_lido else "")
 
     if posicao_digitada:
-        try:
-            res = supabase.table("posicoes").select("*").eq("id_posicao", posicao_digitada).execute()
+        pos_data = supabase.table("posicoes").select("*").eq("id_posicao", posicao_digitada).execute()
+        if pos_data.data:
+            # Busca o que já foi contado nesta posição
+            contagens = supabase.table("inventario").select("sku_contado").eq("id_posicao_fk", pos_data.data[0]['id']).execute()
+            skus_contados = [c['sku_contado'] for c in contagens.data]
             
-            if res.data:
-                st.success(f"Posição {posicao_digitada} encontrada!")
-                
-                opcoes = {}
-                for item in res.data:
-                    sku = item.get('sku', '')
-                    desc = item.get('descricao_sku')
-                    label = f"{sku} - {desc}" if desc and desc.lower() != 'none' else f"{sku}"
-                    opcoes[label] = item
-                
+            # Prepara opções com Status
+            opcoes = {}
+            for item in pos_data.data:
+                sku = item['sku']
+                status = "✅ Já Contado" if sku in skus_contados else "⏳ Pendente"
+                desc = item.get('descricao_sku') or ""
+                label = f"{status} | {sku} - {desc}"
+                opcoes[label] = item
+
+            # Bloqueio se 100% contada
+            if len(skus_contados) >= len(pos_data.data):
+                st.balloons()
+                st.success(f"Posição {posicao_digitada} já está 100% contada!")
+            else:
                 sku_selecionado = st.selectbox("Selecione o produto:", list(opcoes.keys()))
                 
                 with st.form("form_contagem", clear_on_submit=True):
-                    # --- NOVO CAMPO ADICIONADO ---
                     fabricante = st.text_input("Fabricante")
                     lote = st.text_input("Lote")
-                    qtd = st.number_input("Quantidade Contada", min_value=0, step=1)
-                    gtin = st.text_input("GTIN / Código de Barras")
+                    qtd = st.number_input("Quantidade", min_value=0, step=1)
                     
-                    if st.form_submit_button("Registrar Contagem"):
+                    # Checkbox GTIN
+                    sem_gtin = st.checkbox("Produto sem GTIN / Código de Barras")
+                    gtin = st.text_input("GTIN do produto", disabled=sem_gtin)
+                    
+                    if st.form_submit_button("Registrar"):
                         item = opcoes[sku_selecionado]
                         supabase.table("inventario").insert({
                             "id_posicao_fk": item['id'],
                             "sku_contado": item['sku'],
-                            "fabricante": fabricante,  # Adicionado aqui
+                            "fabricante": fabricante,
                             "lote": lote,
                             "quantidade": qtd,
-                            "gtin_lido": gtin,
+                            "gtin_lido": "SEM GTIN" if sem_gtin else gtin,
                             "usuario_email": st.session_state.user['email']
                         }).execute()
-                        st.success("Contagem registrada com sucesso!")
-            else:
-                st.warning("Posição não encontrada no banco de dados.")
-        except Exception as e:
-            st.error(f"Erro ao processar: {e}")
-
-    if st.button("Sair"):
-        st.session_state.user = None
-        st.rerun()
+                        st.success("Registrado!")
+                        st.rerun()
+        else:
+            st.warning("Posição não encontrada.")
