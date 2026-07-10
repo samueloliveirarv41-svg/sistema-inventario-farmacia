@@ -29,12 +29,51 @@ if st.session_state.user is None:
 else:
     modo_adm = False
 
-    # --- DASHBOARD ADMINISTRATIVO ---
+   # --- DASHBOARD ADMINISTRATIVO ---
     if st.session_state.user.get('perfil') == 'ADM':
+        # O checkbox na barra lateral ativa o modo
         modo_adm = st.sidebar.checkbox("Modo Administrador")
+        
         if modo_adm:
             st.title("📊 Painel de Controle")
-            # ... (código do admin omitido para focar no erro do operador) ...
+            
+            # 1. Busca as posições totais e as contadas
+            todas = supabase.table("posicoes").select("id_posicao").execute().data
+            set_total = set([p['id_posicao'] for p in todas])
+            
+            contagens = supabase.table("inventario").select("id_posicao_fk").execute().data
+            # Mapeia IDs para contagem
+            ids_contados = set([c['id_posicao_fk'] for c in contagens])
+            
+            # 2. Cálculos das métricas
+            total = len(set_total)
+            contadas = len(ids_contados)
+            pendentes = total - contadas
+            
+            # 3. Exibição das colunas
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total Posições", total)
+            col2.metric("Contadas", contadas)
+            col3.metric("Pendentes", pendentes)
+            
+            st.divider()
+            
+            # 4. Exibição do relatório em tabela
+            st.subheader("Registros Detalhados")
+            if contagens:
+                df = pd.DataFrame(supabase.table("inventario").select("*").execute().data)
+                st.dataframe(df)
+                
+                # Botão de exportação
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Exportar para CSV",
+                    data=csv,
+                    file_name='inventario_completo.csv',
+                    mime='text/csv',
+                )
+            else:
+                st.info("Nenhum item foi contado até o momento.")
 
     # --- PAINEL DE CONTAGEM ---
     if not modo_adm:
