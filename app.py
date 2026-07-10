@@ -34,7 +34,6 @@ else:
     
     st.subheader("Bipe a Posição")
     valor_lido = qrcode_scanner(key='scanner')
-    
     posicao_digitada = st.text_input("Código da Posição:", value=valor_lido if valor_lido else "")
 
     if posicao_digitada:
@@ -44,18 +43,18 @@ else:
             if res.data:
                 st.success(f"Posição {posicao_digitada} encontrada!")
                 
-                # Ajuste para não mostrar "None"
                 opcoes = {}
                 for item in res.data:
                     sku = item.get('sku', '')
                     desc = item.get('descricao_sku')
-                    # Cria um label limpo
                     label = f"{sku} - {desc}" if desc and desc.lower() != 'none' else f"{sku}"
                     opcoes[label] = item
                 
                 sku_selecionado = st.selectbox("Selecione o produto:", list(opcoes.keys()))
                 
                 with st.form("form_contagem", clear_on_submit=True):
+                    # --- NOVO CAMPO ADICIONADO ---
+                    fabricante = st.text_input("Fabricante")
                     lote = st.text_input("Lote")
                     qtd = st.number_input("Quantidade Contada", min_value=0, step=1)
                     gtin = st.text_input("GTIN / Código de Barras")
@@ -65,6 +64,7 @@ else:
                         supabase.table("inventario").insert({
                             "id_posicao_fk": item['id'],
                             "sku_contado": item['sku'],
+                            "fabricante": fabricante,  # Adicionado aqui
                             "lote": lote,
                             "quantidade": qtd,
                             "gtin_lido": gtin,
