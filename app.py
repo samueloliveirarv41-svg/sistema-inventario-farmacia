@@ -2,6 +2,7 @@ import streamlit as st
 from supabase import create_client
 from streamlit_qrcode_scanner import qrcode_scanner
 import pandas as pd
+import time  # Importado para garantir sincronia com o banco
 
 # --- CONFIGURAÇÃO ---
 SUPABASE_URL = "https://ywkxkwmseaqfghnyghpz.supabase.co"
@@ -35,7 +36,7 @@ else:
         if modo_adm:
             st.title("📊 Painel de Controle: Posições")
             
-            # Busca todas as posições únicas e as já contadas
+            # Cálculo de métricas
             todas_posicoes = supabase.table("posicoes").select("id_posicao").execute().data
             set_total = set([p['id_posicao'] for p in todas_posicoes])
             
@@ -46,7 +47,6 @@ else:
             contadas = len(ids_contados)
             pendentes = total - contadas
             
-            # Cards de métricas
             col1, col2, col3 = st.columns(3)
             col1.metric("Total Posições", total)
             col2.metric("Contadas", contadas)
@@ -62,7 +62,6 @@ else:
                 st.info("Nenhuma contagem realizada.")
 
     # --- PAINEL DE CONTAGEM ---
-    # Só exibe se não estiver em modo ADM
     if not modo_adm:
         st.title("📦 Inventário CCE")
         st.write(f"Usuário: {st.session_state.user['email']}")
@@ -74,11 +73,11 @@ else:
             pos_data = supabase.table("posicoes").select("*").eq("id_posicao", posicao_digitada).execute()
             
             if pos_data.data:
-                # Busca as contagens ATUALIZADAS do banco
+                # Busca contagens atualizadas
                 contagens = supabase.table("inventario").select("sku_contado").eq("id_posicao_fk", pos_data.data[0]['id']).execute()
                 skus_contados = [c['sku_contado'] for c in contagens.data]
                 
-                # Monta lista de produtos com status atualizado em tempo real
+                # Monta lista com status
                 opcoes = {}
                 for item in pos_data.data:
                     sku = item['sku']
@@ -87,7 +86,6 @@ else:
                     label = f"{status} {sku} - {desc}"
                     opcoes[label] = item
 
-                # Verifica se a posição foi finalizada
                 if len(skus_contados) >= len(pos_data.data):
                     st.balloons()
                     st.success(f"Posição {posicao_digitada} finalizada!")
@@ -102,10 +100,10 @@ else:
                         gtin = st.text_input("GTIN / Código de Barras", disabled=sem_gtin)
                         
                         if st.form_submit_button("Registrar"):
-                            item = opcoes[sku_selecionado]
+                            # Insere no banco
                             supabase.table("inventario").insert({
-                                "id_posicao_fk": item['id'],
-                                "sku_contado": item['sku'],
+                                "id_posicao_fk": opcoes[sku_selecionado]['id'],
+                                "sku_contado": opcoes[sku_selecionado]['sku'],
                                 "fabricante": fabricante,
                                 "lote": lote,
                                 "quantidade": qtd,
@@ -113,8 +111,12 @@ else:
                                 "usuario_email": st.session_state.user['email']
                             }).execute()
                             
-                            st.success("Registrado!")
-                            st.rerun() # Recarrega a página para atualizar o status do item na lista
+                            # Pausa e limpeza para garantir que o rerun pegue o dado fresco
+                            time.sleep(0.5)
+                            st.cache_data.clear()
+                            
+                            st.success("Registrado com sucesso!")
+                            st.rerun() 
             else:
                 st.warning("Posição não encontrada.")
 
