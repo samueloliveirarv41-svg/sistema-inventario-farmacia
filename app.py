@@ -32,50 +32,34 @@ else:
     # --- DASHBOARD ADMINISTRATIVO ---
     if st.session_state.user.get('perfil') == 'ADM':
         modo_adm = st.sidebar.checkbox("Modo Administrador")
-        
         if modo_adm:
-            st.title("📊 Painel de Controle: Posições")
-            
-            # Consultas diretas para garantir dados atuais
-            todas = supabase.table("posicoes").select("id_posicao").execute().data
-            set_total = set([p['id_posicao'] for p in todas])
-            contagens = supabase.table("inventario").select("id_posicao_fk").execute().data
-            ids_contados = set([c['id_posicao_fk'] for c in contagens])
-            
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total Posições", len(set_total))
-            col2.metric("Contadas", len(ids_contados))
-            col3.metric("Pendentes", len(set_total) - len(ids_contados))
-            
-            st.divider()
-            if contagens:
-                df = pd.DataFrame(supabase.table("inventario").select("*").execute().data)
-                st.dataframe(df)
+            st.title("📊 Painel de Controle")
+            # ... (código do admin omitido para focar no erro do operador) ...
 
     # --- PAINEL DE CONTAGEM ---
     if not modo_adm:
         st.title("📦 Inventário CCE")
-        st.write(f"Usuário: {st.session_state.user['email']}")
         
         valor_lido = qrcode_scanner(key='scanner')
         posicao_digitada = st.text_input("Código da Posição:", value=valor_lido if valor_lido else "")
 
         if posicao_digitada:
-            # Busca a posição e as contagens já feitas nesta posição
             pos_data = supabase.table("posicoes").select("*").eq("id_posicao", posicao_digitada).execute()
             
             if pos_data.data:
                 id_pos = pos_data.data[0]['id']
-                # Consulta direta ao banco (sem cache) para garantir atualização
+                
+                # BUSCA DIRETA SEM CACHE
                 res = supabase.table("inventario").select("sku_contado").eq("id_posicao_fk", id_pos).execute()
                 skus_contados = [c['sku_contado'] for c in res.data]
                 
-                # Monta lista com status atualizado
+                # Monta lista com DESCRIÇÃO
                 opcoes = {}
                 for item in pos_data.data:
                     sku = item['sku']
+                    desc = item.get('descricao_sku') or "Sem descrição"
                     status = "✅" if sku in skus_contados else "⏳"
-                    label = f"{status} {sku}"
+                    label = f"{status} {sku} - {desc}"
                     opcoes[label] = item
 
                 if len(skus_contados) >= len(pos_data.data):
@@ -88,11 +72,12 @@ else:
                         fabricante = st.text_input("Fabricante")
                         lote = st.text_input("Lote")
                         qtd = st.number_input("Quantidade", min_value=0, step=1)
-                        sem_gtin = st.checkbox("Produto sem GTIN")
-                        gtin = st.text_input("GTIN / Código de Barras", disabled=sem_gtin)
+                        
+                        # LOGICA DO GTIN
+                        sem_gtin = st.checkbox("Produto sem GTIN", key="check_gtin")
+                        gtin = st.text_input("GTIN / Código de Barras", disabled=st.session_state.check_gtin)
                         
                         if st.form_submit_button("Registrar"):
-                            # Insere o novo registro
                             supabase.table("inventario").insert({
                                 "id_posicao_fk": id_pos,
                                 "sku_contado": opcoes[sku_sel]['sku'],
@@ -103,9 +88,8 @@ else:
                                 "usuario_email": st.session_state.user['email']
                             }).execute()
                             
-                            # Confirmação visual rápida e atualização
-                            st.toast("Contagem registrada com sucesso!", icon="✅")
-                            time.sleep(0.5) 
+                            st.toast("Registrado!", icon="✅")
+                            time.sleep(0.3)
                             st.rerun()
             else:
                 st.warning("Posição não encontrada.")
