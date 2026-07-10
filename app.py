@@ -6,7 +6,6 @@ import pandas as pd
 # --- CONFIGURAÇÃO ---
 SUPABASE_URL = "https://ywkxkwmseaqfghnyghpz.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl3a3hrd21zZWFxZmdobnlnaHB6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MDQ4ODIsImV4cCI6MjA5OTA4MDg4Mn0.JM4ZZ1SUqCXp2GU13p3xoHWxO1WJmZeQ4KL_jN_u1TE"
-ADMINS = ["seu-email-adm@rvimola.com.br"] # Adicione os e-mails aqui
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -27,8 +26,8 @@ if st.session_state.user is None:
         else:
             st.error("Usuário não encontrado.")
 else:
-    # --- DASHBOARD ADMIN ---
-    if st.session_state.user['email'] in ADMINS:
+    # --- DASHBOARD ADMIN (Verifica se perfil é 'ADM') ---
+    if st.session_state.user.get('perfil') == 'ADM':
         if st.sidebar.checkbox("Modo Administrador"):
             st.title("📊 Dashboard de Gestão")
             dados = supabase.table("inventario").select("*").execute()
@@ -45,7 +44,7 @@ else:
 
     # --- PAINEL DE CONTAGEM ---
     st.title("📦 Inventário CCE")
-    st.write(f"Usuário: {st.session_state.user['email']}")
+    st.write(f"Usuário: {st.session_state.user['email']} | Perfil: {st.session_state.user.get('perfil')}")
     
     valor_lido = qrcode_scanner(key='scanner')
     posicao_digitada = st.text_input("Código da Posição:", value=valor_lido if valor_lido else "")
