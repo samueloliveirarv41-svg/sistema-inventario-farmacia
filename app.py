@@ -2,7 +2,7 @@ import streamlit as st
 from supabase import create_client
 from streamlit_qrcode_scanner import qrcode_scanner
 import pandas as pd
-import time  # Importado para garantir sincronia com o banco
+import time
 
 # --- CONFIGURAÇÃO ---
 SUPABASE_URL = "https://ywkxkwmseaqfghnyghpz.supabase.co"
@@ -12,8 +12,16 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 st.set_page_config(page_title="Inventário CCE", layout="centered")
 
+# Inicialização de sessão
 if 'user' not in st.session_state:
     st.session_state.user = None
+
+# --- FUNÇÃO DE BUSCA OTIMIZADA (Para garantir tempo real) ---
+@st.cache_data(ttl=0)
+def buscar_contagens_banco(id_posicao_fk):
+    # Força a re-leitura do banco ignorando qualquer cache anterior
+    res = supabase.table("inventario").select("sku_contado").eq("id_posicao_fk", id_posicao_fk).execute()
+    return [c['sku_contado'] for c in res.data]
 
 # --- LOGIN ---
 if st.session_state.user is None:
@@ -36,30 +44,22 @@ else:
         if modo_adm:
             st.title("📊 Painel de Controle: Posições")
             
-            # Cálculo de métricas
-            todas_posicoes = supabase.table("posicoes").select("id_posicao").execute().data
-            set_total = set([p['id_posicao'] for p in todas_posicoes])
-            
+            # Métricas
+            todas = supabase.table("posicoes").select("id_posicao").execute().data
+            set_total = set([p['id_posicao'] for p in todas])
             contagens = supabase.table("inventario").select("id_posicao_fk").execute().data
             ids_contados = set([c['id_posicao_fk'] for c in contagens])
             
-            total = len(set_total)
-            contadas = len(ids_contados)
-            pendentes = total - contadas
-            
             col1, col2, col3 = st.columns(3)
-            col1.metric("Total Posições", total)
-            col2.metric("Contadas", contadas)
-            col3.metric("Pendentes", pendentes)
+            col1.metric("Total Posições", len(set_total))
+            col2.metric("Contadas", len(ids_contados))
+            col3.metric("Pendentes", len(set_total) - len(ids_contados))
             
             st.divider()
-            st.subheader("Relatório Detalhado")
             if contagens:
                 df = pd.DataFrame(supabase.table("inventario").select("*").execute().data)
                 st.dataframe(df)
                 st.download_button("Exportar CSV", df.to_csv(index=False), "relatorio.csv", "text/csv")
-            else:
-                st.info("Nenhuma contagem realizada.")
 
     # --- PAINEL DE CONTAGEM ---
     if not modo_adm:
@@ -73,24 +73,22 @@ else:
             pos_data = supabase.table("posicoes").select("*").eq("id_posicao", posicao_digitada).execute()
             
             if pos_data.data:
-                # Busca contagens atualizadas
-                contagens = supabase.table("inventario").select("sku_contado").eq("id_posicao_fk", pos_data.data[0]['id']).execute()
-                skus_contados = [c['sku_contado'] for c in contagens.data]
+                id_pos = pos_data.data[0]['id']
+                # Chama a função que busca dados frescos
+                skus_contados = buscar_contagens_banco(id_pos)
                 
-                # Monta lista com status
                 opcoes = {}
                 for item in pos_data.data:
                     sku = item['sku']
                     status = "✅" if sku in skus_contados else "⏳"
-                    desc = item.get('descricao_sku') or ""
-                    label = f"{status} {sku} - {desc}"
+                    label = f"{status} {sku} - {item.get('descricao_sku') or ''}"
                     opcoes[label] = item
 
                 if len(skus_contados) >= len(pos_data.data):
                     st.balloons()
                     st.success(f"Posição {posicao_digitada} finalizada!")
                 else:
-                    sku_selecionado = st.selectbox("Selecione o produto (pendentes):", list(opcoes.keys()))
+                    sku_sel = st.selectbox("Selecione o produto (pendentes):", list(opcoes.keys()))
                     
                     with st.form("form_contagem", clear_on_submit=True):
                         fabricante = st.text_input("Fabricante")
@@ -100,10 +98,9 @@ else:
                         gtin = st.text_input("GTIN / Código de Barras", disabled=sem_gtin)
                         
                         if st.form_submit_button("Registrar"):
-                            # Insere no banco
                             supabase.table("inventario").insert({
-                                "id_posicao_fk": opcoes[sku_selecionado]['id'],
-                                "sku_contado": opcoes[sku_selecionado]['sku'],
+                                "id_posicao_fk": opcoes[sku_sel]['id'],
+                                "sku_contado": opcoes[sku_sel]['sku'],
                                 "fabricante": fabricante,
                                 "lote": lote,
                                 "quantidade": qtd,
@@ -111,12 +108,10 @@ else:
                                 "usuario_email": st.session_state.user['email']
                             }).execute()
                             
-                            # Pausa e limpeza para garantir que o rerun pegue o dado fresco
-                            time.sleep(0.5)
+                            # Força a limpeza do cache e recarrega a página
                             st.cache_data.clear()
-                            
-                            st.success("Registrado com sucesso!")
-                            st.rerun() 
+                            time.sleep(0.3)
+                            st.rerun()
             else:
                 st.warning("Posição não encontrada.")
 
